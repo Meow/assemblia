@@ -24,9 +24,16 @@ set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
-if (NOT WIN32)
+if (NOT WIN32 AND NOT APPLE)
   set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
   set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+endif()
+
+if (APPLE)
+  # GLFW's Cocoa backend is the only option here; Wayland/X11 must stay off.
+  set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+  set(GLFW_BUILD_X11 OFF CACHE BOOL "" FORCE)
+  set(GLFW_BUILD_COCOA ON CACHE BOOL "" FORCE)
 endif()
 
 find_package(Threads REQUIRED)
@@ -60,6 +67,30 @@ include_directories("${VULKAN_HEADERS_DIR}/include")
 include_directories("${STB_DIR}/")
 
 add_subdirectory(../../vendor/glfw ../../../build/glfw)
+
+if (APPLE)
+  # The renderer loads Vulkan entry points through GLFW, which dlopen()s the
+  # Vulkan loader by bare name. dlopen() doesn't search Homebrew's prefix, so
+  # hand GLFW an absolute path to the MoltenVK-backed loader instead. This
+  # makes the binary run without VULKAN_SDK / DYLD_LIBRARY_PATH set.
+  find_library(VULKAN_LOADER_LIB
+    NAMES vulkan vulkan.1 libvulkan.1.dylib
+    HINTS
+      $ENV{VULKAN_SDK}/lib
+      /opt/homebrew/lib
+      /opt/homebrew/opt/vulkan-loader/lib
+      /usr/local/lib
+      /usr/local/opt/vulkan-loader/lib)
+
+  if (VULKAN_LOADER_LIB)
+    message(STATUS "Using Vulkan loader: ${VULKAN_LOADER_LIB}")
+    target_compile_definitions(glfw PRIVATE _GLFW_VULKAN_LIBRARY="${VULKAN_LOADER_LIB}")
+  else()
+    message(WARNING "Vulkan loader (libvulkan) not found; install the vulkan-loader "
+                    "and molten-vk Homebrew formulae, then reconfigure.")
+  endif()
+endif()
+
 add_subdirectory(render ../../../build/render)
 add_subdirectory(state ../../../build/state)
 add_subdirectory(input ../../../build/input)

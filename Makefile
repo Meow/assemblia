@@ -1,20 +1,23 @@
 .PHONY: all build test clean
 
+# nproc is GNU-only; fall back to sysctl on macOS/BSD.
+NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
 all: configure build
 
 configure:
 	cmake -DCMAKE_BUILD_TYPE=Debug -B build -S .
 
 build:
-	cmake --build build --config Debug -j $(nproc)
+	cmake --build build --config Debug -j $(NPROC)
 
 release:
 	cmake -DCMAKE_BUILD_TYPE=Release -B build -S .
-	cmake --build build --config Release -j $(nproc)
+	cmake --build build --config Release -j $(NPROC)
 
 dist:
 	cmake -DCMAKE_BUILD_TYPE=Release -B build -S .
-	cmake --build build --config Release -j $(nproc)
+	cmake --build build --config Release -j $(NPROC)
 	rm -rf dist
 	mkdir dist
 	cp build/engine/miniflow dist/miniflow

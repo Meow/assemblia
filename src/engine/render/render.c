@@ -28,7 +28,7 @@ i32 render_perform(void *args) {
 
   glfwSetErrorCallback(glfw_error_fun);
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
   if (strcmp(state->preferred_platform, "x11") == 0)
     glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
   else
@@ -256,8 +256,9 @@ i32 render_perform(void *args) {
 
     start_time = platform_time_usec();
 
-#ifdef _WIN32
-    /* And as always, Windows is SPECIAL */
+#if defined(_WIN32) || defined(__APPLE__)
+    /* Windows polls on the render thread; macOS must poll on the main thread,
+     * which is the render thread here. Elsewhere the input thread polls. */
     glfwPollEvents();
 #endif
 

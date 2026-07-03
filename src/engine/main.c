@@ -33,6 +33,22 @@ i32 main(const i32 argc, const char *argv[]) {
   /* Spawn threads */
   ThreadData thread_data = { .state = state, .lock = &state_lock };
 
+#ifdef __APPLE__
+  /* macOS (Cocoa) requires that windowing and event polling happen on the main
+   * thread, so the render thread — which owns the GLFW window and pumps events
+   * — must be the main thread here. Only logic and input are spawned. */
+  const thread_t logic_thread = platform_spawn(logic_perform, &thread_data);
+  const thread_t input_thread = platform_spawn(input_perform, &thread_data);
+
+  DEBUG_MESSAGE("Entering main loop...\n");
+
+  render_perform(&thread_data);
+
+  printf("Exiting...\n");
+
+  platform_join(input_thread);
+  platform_join(logic_thread);
+#else
   const thread_t render_thread = platform_spawn(render_perform, &thread_data);
   const thread_t logic_thread  = platform_spawn(logic_perform, &thread_data);
   const thread_t input_thread  = platform_spawn(input_perform, &thread_data);
@@ -49,6 +65,7 @@ i32 main(const i32 argc, const char *argv[]) {
   platform_join(input_thread);
   platform_join(logic_thread);
   platform_join(render_thread);
+#endif
 
   /* Clean up */
   free(state);

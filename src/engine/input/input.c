@@ -60,7 +60,7 @@ i32 input_perform(void *args) {
   GLFWgamepadstate gs_last;
 
   while (!game_should_exit(state)) {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
     glfwPollEvents();
 #endif
 

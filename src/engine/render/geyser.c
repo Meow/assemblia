@@ -2,6 +2,19 @@
 
 #include <string.h>
 
+/* The vendored glad Vulkan header predates the portability extensions that
+ * MoltenVK requires, so define the names/flag values ourselves if missing.
+ * These are stable, spec-defined constants. */
+#ifndef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
+#define VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME "VK_KHR_portability_enumeration"
+#endif
+#ifndef VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR
+#define VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR 0x00000001
+#endif
+#ifndef VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
+#define VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME "VK_KHR_portability_subset"
+#endif
+
 /* This pretty much remains the same all the time */
 static const VkSemaphoreCreateInfo semaphore_create_info = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
                                                              .pNext = NULL,
@@ -89,8 +102,18 @@ void geyser_init_vk(RenderState *restrict state) {
   const char *ext_names[16];
   const char *validation_layer_names[1];
 
-  for (u8 i = 0; i < ext_count; i++)
-    ext_names[i] = extensions[i];
+  u32 ext_names_count = 0;
+  for (u32 i = 0; i < ext_count; i++)
+    ext_names[ext_names_count++] = extensions[i];
+
+  VkInstanceCreateFlags instance_flags = 0;
+
+#ifdef __APPLE__
+  /* MoltenVK is a non-conformant (portability) driver, so it is only reported
+   * by the loader when portability enumeration is explicitly requested. */
+  ext_names[ext_names_count++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+  instance_flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
 
   if (state->debug == 1) {
     u32 layer_count = 0;
@@ -114,9 +137,10 @@ void geyser_init_vk(RenderState *restrict state) {
       validation_layer_count = 0;
     }
 
-    ext_names[ext_count] = "VK_EXT_debug_report";
-    ext_count            = 3;
+    ext_names[ext_names_count++] = "VK_EXT_debug_report";
   }
+
+  ext_count = ext_names_count;
 
   const VkApplicationInfo app_info = {
     GEYSER_MINIMAL_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_APPLICATION_INFO),
@@ -127,7 +151,9 @@ void geyser_init_vk(RenderState *restrict state) {
     .apiVersion         = VK_API_VERSION_1_1 /* 1.1.0 */
   };
 
-  const VkInstanceCreateInfo instance_info = { GEYSER_BASIC_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO),
+  const VkInstanceCreateInfo instance_info = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+                                               .pNext                   = NULL,
+                                               .flags                   = instance_flags,
                                                .pApplicationInfo        = &app_info,
                                                .enabledLayerCount       = validation_layer_count,
                                                .ppEnabledLayerNames     = validation_layer_names,
@@ -248,14 +274,39 @@ void geyser_init_vk(RenderState *restrict state) {
     .pQueuePriorities = queue_prios
   };
 
-  const char *device_ext_names[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME };
+  const char *device_ext_names[8];
+  u32 device_ext_count            = 0;
+  device_ext_names[device_ext_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+  device_ext_names[device_ext_count++] = VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME;
+
+  /* If the device exposes VK_KHR_portability_subset (e.g. MoltenVK), the Vulkan
+   * spec requires that we enable it. */
+  u32 available_device_ext_count = 0;
+  vkEnumerateDeviceExtensionProperties(state->physical_device, NULL, &available_device_ext_count, NULL);
+
+  if (available_device_ext_count > 0) {
+    VkExtensionProperties *available_device_exts =
+      (VkExtensionProperties *)malloc(sizeof(VkExtensionProperties) * available_device_ext_count);
+    vkEnumerateDeviceExtensionProperties(
+      state->physical_device, NULL, &available_device_ext_count, available_device_exts
+    );
+
+    for (u32 i = 0; i < available_device_ext_count; i++) {
+      if (strcmp(available_device_exts[i].extensionName, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME) == 0) {
+        device_ext_names[device_ext_count++] = VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME;
+        break;
+      }
+    }
+
+    free(available_device_exts);
+  }
 
   const VkDeviceCreateInfo device_create_info = { GEYSER_BASIC_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO),
                                                   .queueCreateInfoCount    = 1,
                                                   .pQueueCreateInfos       = &queue_create_info,
                                                   .enabledLayerCount       = validation_layer_count,
                                                   .ppEnabledLayerNames     = validation_layer_names,
-                                                  .enabledExtensionCount   = 2,
+                                                  .enabledExtensionCount   = device_ext_count,
                                                   .ppEnabledExtensionNames = device_ext_names,
                                                   .pEnabledFeatures        = &state->physical_device_features };
 
