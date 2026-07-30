@@ -1,17 +1,17 @@
 
 with import <nixpkgs> {};
-gcc11Stdenv.mkDerivation {
+gcc16Stdenv.mkDerivation {
   name = "env";
   nativeBuildInputs = [
     vulkan-headers
     cmake
-    gcc11
+    gcc16
     mold
   ];
 
   buildInputs = [
     gdb
-    clang_14
+    clang_22
     vulkan-loader
     vulkan-tools
     vulkan-validation-layers
@@ -20,20 +20,20 @@ gcc11Stdenv.mkDerivation {
     wayland
     wayland-protocols
     libxkbcommon
-    extra-cmake-modules
+    kdePackages.extra-cmake-modules
     libGL
     libffi
     renderdoc
-    xorg.libX11
-    xorg.libX11.dev
-    xorg.libXrandr.dev
-    xorg.libXinerama.dev
-    xorg.libXcursor.dev
-    xorg.libXi.dev
-    xorg.libXext.dev
+    libx11
+    libx11.dev
+    libxrandr.dev
+    libxinerama.dev
+    libxcursor.dev
+    libxi.dev
+    libxext.dev
   ];
 
   shellHook = ''
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${lib.strings.makeLibraryPath [ libGL vulkan-loader libxkbcommon wayland xorg.libX11 ]}
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${lib.strings.makeLibraryPath [ libGL vulkan-loader libxkbcommon wayland libx11 ]}
   '';
 }
