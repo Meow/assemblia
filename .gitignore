@@ -7,3 +7,4 @@ CMakeOutput.log
 dist/
 **/*.spv
 **/out
+shader_cache/

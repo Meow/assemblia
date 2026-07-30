@@ -1,7 +1,7 @@
 #include "render.h"
 
 #include "glyph.h"
-#include "shaders/shaders.h"
+#include "shader_compiler.h"
 
 #include <game/interface.h>
 
@@ -27,6 +27,23 @@ i32 render_perform(void *args) {
   GlyphText *text_objects;
 
   glfwSetErrorCallback(glfw_error_fun);
+
+  /* Compile (or load cached) shaders before bringing up the window so we fail fast. */
+  u32 unlit_generic_vert_size, unlit_generic_frag_size, text_vert_size, text_frag_size;
+  u8 *unlit_generic_vert = shader_load("unlit_generic.vert", SHADER_STAGE_VERTEX, &unlit_generic_vert_size);
+  u8 *unlit_generic_frag = shader_load("unlit_generic.frag", SHADER_STAGE_FRAGMENT, &unlit_generic_frag_size);
+  u8 *text_vert          = shader_load("text.vert", SHADER_STAGE_VERTEX, &text_vert_size);
+  u8 *text_frag          = shader_load("text.frag", SHADER_STAGE_FRAGMENT, &text_frag_size);
+
+  if (unlit_generic_vert == NULL || unlit_generic_frag == NULL || text_vert == NULL || text_frag == NULL) {
+    shader_free(unlit_generic_vert);
+    shader_free(unlit_generic_frag);
+    shader_free(text_vert);
+    shader_free(text_frag);
+    game_add_flag(state, GS_EXIT);
+
+    return 1;
+  }
 
 #if !defined(_WIN32) && !defined(__APPLE__)
   if (strcmp(state->preferred_platform, "x11") == 0)
@@ -129,10 +146,10 @@ i32 render_perform(void *args) {
     1,
     push_constant_range,
     1,
-    unlit_generic_vert_data,
-    unlit_generic_vert_data_size,
-    unlit_generic_frag_data,
-    unlit_generic_frag_data_size,
+    unlit_generic_vert,
+    unlit_generic_vert_size,
+    unlit_generic_frag,
+    unlit_generic_frag_size,
     &vertex_input_description,
     (GeyserPipeline *)&render_state->pipeline
   );
@@ -162,13 +179,18 @@ i32 render_perform(void *args) {
     1,
     text_push_constant_range,
     1,
-    text_vert_data,
-    text_vert_data_size,
-    text_frag_data,
-    text_frag_data_size,
+    text_vert,
+    text_vert_size,
+    text_frag,
+    text_frag_size,
     &text_vertex_input_description,
     (GeyserPipeline *)&render_state->text_pipeline
   );
+
+  shader_free(unlit_generic_vert);
+  shader_free(unlit_generic_frag);
+  shader_free(text_vert);
+  shader_free(text_frag);
 
   void *text_data_handle;
 

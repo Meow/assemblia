@@ -22,7 +22,7 @@ CMake targets Debug by default. The build is driven by `CMakeLists.txt` → `src
 
 ### macOS (arm64, via MoltenVK)
 
-macOS is supported through **MoltenVK** (Vulkan-over-Metal). Prerequisites (Homebrew): `brew install vulkan-loader vulkan-headers molten-vk glfw` — only `vulkan-loader` + `molten-vk` are needed at runtime; the loader auto-discovers the MoltenVK ICD, and CMake bakes the loader's absolute path into GLFW so no `VULKAN_SDK`/`DYLD_LIBRARY_PATH` is required. Then `make run` as usual.
+macOS is supported through **MoltenVK** (Vulkan-over-Metal). Prerequisites (Homebrew): `brew install vulkan-loader vulkan-headers molten-vk glfw glslang` — `vulkan-loader` + `molten-vk` + `glslang` are needed at runtime; the loader auto-discovers the MoltenVK ICD, and CMake bakes the loader's absolute path into GLFW so no `VULKAN_SDK`/`DYLD_LIBRARY_PATH` is required. Then `make run` as usual.
 
 Platform-specific porting notes (things to preserve when touching engine internals):
 - **Cocoa is single-threaded for UI.** GLFW window creation and `glfwPollEvents` must run on the main thread, so on macOS `main.c` runs `render_perform` on the main thread (rather than spawning it) and events are polled in the render loop — mirroring the Windows path. `input.c` therefore skips `glfwPollEvents` on macOS.
@@ -31,7 +31,7 @@ Platform-specific porting notes (things to preserve when touching engine interna
 
 ### Shaders
 
-Shader sources live in `src/engine/render/shaders/*.{vert,frag}`. They are compiled to SPIR-V and **baked into `shaders.h`** (a generated C header) so the binary has no runtime shader files. Regenerate with `make shaders` (Linux only; needs `glslc`, `spirv-val`/`spirv-tools`, and Ruby ≥2.7). Editing a `.vert`/`.frag` has no effect until you re-run this.
+Shader sources live in `shaders/*.{vert,frag}` (top-level, shipped with the game like `lua/` and `assets/`). They are **compiled to SPIR-V at startup** by `src/engine/render/shader_compiler.c` using the glslang C API, and cached in `shader_cache/` (gitignored, created next to the working directory). A shader is recompiled only when its source mtime is newer than the cached `.spv`; otherwise the cache is loaded directly. Editing a `.vert`/`.frag` takes effect on the next launch — no build step. A compile error prints the glslang log and exits before the window opens. glslang is a build/runtime dependency (Homebrew `glslang` on macOS, `glslang-dev` or the Vulkan SDK elsewhere), found via `find_package(glslang CONFIG)` in `src/engine/render/CMakeLists.txt`.
 
 ### Lint
 

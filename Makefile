@@ -24,6 +24,7 @@ dist:
 	cp -r assets/ dist/assets
 	cp -r levels/ dist/levels
 	cp -r lua/ dist/lua
+	cp -r shaders/ dist/shaders
 
 exec:
 	./build/engine/miniflow
@@ -40,13 +41,7 @@ analyze:
 	find ./src -type f -name '*.c' -exec clang -Xanalyzer,--exclude,./vendor -I./src -I./vendor/glfw/include -I./vendor/stb -I./vendor/glad/include -I./vendor/vulkan-headers -I./vendor/luajit/src -I./vendor/simdjson -Wno-unused-command-line-argument --analyze -Xanalyzer -analyzer-output=text {} \;
 	find ./src -type f -name '*.cpp' -exec clang -Xanalyzer,--exclude,./vendor -I./src -I./vendor/glfw/include -I./vendor/stb -I./vendor/glad/include -I./vendor/vulkan-headers -I./vendor/luajit/src -I./vendor/simdjson -Wno-unused-command-line-argument --analyze -Xanalyzer -analyzer-output=text {} \;
 
-shaders:
-	rm -f ./src/engine/render/shaders/*.spv
-	find ./src/engine/render/shaders -type f -name '*.frag' -exec glslc -fshader-stage=fragment -o {}.spv {} \;
-	find ./src/engine/render/shaders -type f -name '*.vert' -exec glslc -fshader-stage=vertex -o {}.spv {} \;
-	find ./src/engine/render/shaders -type f -name '*.spv' -exec spirv-val {} \;
-	ruby ./src/engine/render/shaders/gen_baked_shaders.rb ./src/engine/render/shaders/
-
 clean:
 	rm -rf build/
 	rm -rf dist/
+	rm -rf shader_cache/

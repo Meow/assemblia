@@ -43,8 +43,16 @@ i32 input_perform(void *args) {
   GLFWwindow *window     = (GLFWwindow *)state->window;
   IS                     = input_state_default();
 
-  /* Avoid the race condition between render thread and this thread */
+  /* Avoid the race condition between render thread and this thread. The render
+   * thread may also exit before ever creating a window (e.g. failed shader
+   * compilation), in which case we must bail instead of waiting forever. */
   while (window == NULL) {
+    if (game_should_exit(state)) {
+      input_state_free(IS);
+
+      return 0;
+    }
+
     window = (GLFWwindow *)state->window;
     platform_sleep(1);
   }

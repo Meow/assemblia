@@ -37,6 +37,7 @@ The game is currently targeted at 64-bit x86 architecture. ARM64 is supported. T
 - cmake
 - Vulkan-compatible GPU driver which provides `libvulkan.so.1` and a Vulkan implementation
 - Headers and libraries for X11 *and* Wayland
+- glslang development package with CMake support (e.g. `glslang-dev`/`glslang-devel`, or the Vulkan SDK), used to compile shaders at startup
 
 **On Windows:**
 
@@ -46,6 +47,7 @@ The game is currently targeted at 64-bit x86 architecture. ARM64 is supported. T
 - git commandline tools
 - Vulkan-compatible GPU driver which provides `vulkan-1.dll` and a Vulkan implementation
 - Visual C++ Redistributables 2015
+- The [Vulkan SDK](https://vulkan.lunarg.com/) (provides glslang, used to compile shaders at startup)
 
 ## Compiling
 
@@ -66,11 +68,11 @@ The game is currently targeted at 64-bit x86 architecture. ARM64 is supported. T
 
 On Linux, run `make clean`. On Windows, delete `build/` and `dist/` folders.
 
-## Compiling shaders
+## Shaders
 
-Compiling shaders is currently only supported of Linux. To do so, you must have Ruby 2.7 or newer installed on your system and available in $PATH.
+Shader sources live in `shaders/` and are compiled to SPIR-V at startup using [glslang](https://github.com/KhronosGroup/glslang). Compiled shaders are cached in a `shader_cache/` directory (created next to the working directory, not tracked by git) and are only recompiled when the source file on disk is newer than its cached SPIR-V. To iterate on a shader, just edit it and restart the game.
 
-`make shaders` will compile the shaders and pack them into the `shaders.h` file.
+This requires the glslang development package at build time (see prerequisites).
 
 ## Linting
 

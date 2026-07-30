@@ -16,7 +16,7 @@ gcc16Stdenv.mkDerivation {
     vulkan-tools
     vulkan-validation-layers
     spirv-tools
-    shaderc
+    glslang
     wayland
     wayland-protocols
     libxkbcommon
