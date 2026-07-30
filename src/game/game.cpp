@@ -156,22 +156,20 @@ void Game::update_paused(GameState *state, mutex_t *lock) {
   LUA_EVENT_CALL(this->lua, 0, 0);
 }
 
-i32 Game::compare_renderables(const void *v1, const void *v2) {
-  const Renderable *r1 = *(Renderable **)v1;
-  const Renderable *r2 = *(Renderable **)v2;
+/* Strict weak ordering: active first, then non-zsorted (map tiles in creation
+   order = Tiled layer order), then zsorted by descending y. Ties must keep
+   their relative order, so this is only valid with a stable sort. */
+bool Game::compare_renderables(const Renderable *r1, const Renderable *r2) {
+  if (r1->active != r2->active)
+    return r1->active == GS_TRUE;
 
-  if (r1->active == GS_TRUE && r2->active == GS_FALSE)
-    return -1;
+  if (r1->should_zsort != r2->should_zsort)
+    return r2->should_zsort == GS_TRUE;
 
-  if (r1->should_zsort == GS_TRUE) {
-    if (r2->should_zsort == GS_FALSE)
-      return 1;
+  if (r1->should_zsort == GS_TRUE)
+    return r1->position.y > r2->position.y;
 
-    if (r1->position.y > r2->position.y)
-      return -1;
-  }
-
-  return 0;
+  return false;
 }
 
 void Game::update_renderables(
@@ -248,7 +246,7 @@ void Game::update_renderables(
   this->ent_manager.dangling_renderables.clear();
 
   /* Z sort */
-  qsort(renderables, renderables_count, sizeof(Renderable *), Game::compare_renderables);
+  std::stable_sort(renderables, renderables + renderables_count, Game::compare_renderables);
 
   /* Assign renderables to entities that don't already have them assigned,
      and updates position and attributes of those which are assigned */

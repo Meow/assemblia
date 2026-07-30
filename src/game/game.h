@@ -102,7 +102,7 @@ public:
   Text *add_text(const std::string text, const Vector4 pos, const Vector4 color, const Vector2 scale);
   void clear_text();
 
-  static i32 compare_renderables(const void *r1, const void *r2);
+  static bool compare_renderables(const Renderable *r1, const Renderable *r2);
   static i32 lua_set_stage(lua_State *state);
   static i32 lua_bind(lua_State *state);
   static i32 lua_get_stage(lua_State *state);

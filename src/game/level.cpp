@@ -305,6 +305,10 @@ void Level::init() {
       const u64 real_id  = tile.tileset_id - ts->uid;
       const u64 row_size = (u64)(1 / ts->aperture_width);
 
+      if (real_id >= ts->count)
+        std::cout << "[Level Warning] Tile id " << tile.tileset_id << " is out of range for tileset " << ts->path
+                  << " (" << ts->count << " tiles) - stale tileset metadata?" << std::endl;
+
       ent->set_uv_size({ ts->aperture_width, ts->aperture_height });
       ent->set_uv_offset({ ts->aperture_width * (real_id % row_size), ts->aperture_height * (real_id / row_size) });
 
@@ -360,6 +364,10 @@ void Level::init() {
     if (ts != nullptr) {
       const u64 real_id  = obj.tileset_id - ts->uid;
       const u64 row_size = (u64)(1 / ts->aperture_width);
+
+      if (real_id >= ts->count)
+        std::cout << "[Level Warning] Tile id " << obj.tileset_id << " is out of range for tileset " << ts->path << " ("
+                  << ts->count << " tiles) - stale tileset metadata?" << std::endl;
 
       ent->set_uv_size({ ts->aperture_width, ts->aperture_height });
       ent->set_uv_offset({ ts->aperture_width * (real_id % row_size), ts->aperture_height * (real_id / row_size) });
