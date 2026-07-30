@@ -335,7 +335,10 @@ i32 render_perform(void *args) {
         push_constants.uv_offset    = renderables[i]->uv_offset;
         push_constants.camera       = render_state->camera_transform;
 
-        if (last_renderable != NULL && memcmp(renderables[i]->uv, last_renderable->uv, sizeof(Vector2) * renderables[i]->vertices_count) != 0) {
+        if (
+          last_renderable != NULL &&
+          memcmp(renderables[i]->uv, last_renderable->uv, sizeof(Vector2) * renderables[i]->vertices_count) != 0
+        ) {
           offsets[0] = renderables[i]->offset;
           vkCmdBindVertexBuffers(render_state->command_buffer, 0, 1, &renderables[i]->pool->buffer, offsets);
         }
@@ -432,6 +435,10 @@ i32 render_perform(void *args) {
 
   for (u32 i = 0; i < MAX_RENDERABLES; i++)
     renderable_free(render_state, renderables[i]);
+
+  memory_destroy_manager(render_state, mm);
+  free(mm);
+  render_state->memory_manager = NULL;
 
   vkUnmapMemory(render_state->device, text_memory);
   free(renderables);

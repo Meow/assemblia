@@ -114,6 +114,8 @@ void renderable_make_rect_ex(const RenderState *state, Renderable *r, const f32 
 }
 
 void renderable_free(RenderState *state, Renderable *r) {
+  /* Renderables that never got memory assigned have no pool;
+   * memory_free_block ignores them. */
   memory_free_block(r->pool, r->offset, renderable_get_size(r));
   /* TODO: fix memory freeing */
   // memory_free_image_block(r->texture.base.base.pool, r->texture.base.base.offset, r->texture.base.base.size);
@@ -287,11 +289,6 @@ void renderable_assign_memory(RenderState *state, MemoryManager *m, Renderable *
 
   memory_find_free_block(state, m, 0, size, &mblock);
 
-  r->offset = mblock.free->offset;
+  r->offset = mblock.offset;
   r->pool   = mblock.pool;
-
-  if (mblock.newblock == 1) {
-    mblock.free->offset += size;
-    mblock.free->size -= size;
-  }
 }

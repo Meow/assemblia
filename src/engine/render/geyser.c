@@ -142,16 +142,31 @@ void geyser_init_vk(RenderState *restrict state) {
 
   ext_count = ext_names_count;
 
-  const VkApplicationInfo app_info = {
-    GEYSER_MINIMAL_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_APPLICATION_INFO),
-    .pApplicationName   = "Geyser",
-    .applicationVersion = 1,
-    .pEngineName        = "Miniflow",
-    .engineVersion      = 1,
-    .apiVersion         = VK_API_VERSION_1_1 /* 1.1.0 */
-  };
+  if (state->debug == 1 && vkEnumerateInstanceVersion != NULL) {
+    u32 instance_api_version = VK_API_VERSION_1_0;
+    vkEnumerateInstanceVersion(&instance_api_version);
 
-  const VkInstanceCreateInfo instance_info = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+    printf(
+      "[Geyser] Loader supports Vulkan %u.%u.%u\n",
+      VK_API_VERSION_MAJOR(instance_api_version),
+      VK_API_VERSION_MINOR(instance_api_version),
+      VK_API_VERSION_PATCH(instance_api_version)
+    );
+  }
+
+  /* Targeting 1.1: the vendored glad loader is generated for Vulkan 1.1, and
+   * its extension detection breaks against instances created with apiVersion
+   * >= 1.2 (the loader stops resolving global commands through
+   * vkGetInstanceProcAddr(instance, ...) for those). Regenerate glad before
+   * raising this. */
+  const VkApplicationInfo app_info = { GEYSER_MINIMAL_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_APPLICATION_INFO),
+                                       .pApplicationName   = "Geyser",
+                                       .applicationVersion = 1,
+                                       .pEngineName        = "Miniflow",
+                                       .engineVersion      = 1,
+                                       .apiVersion         = VK_API_VERSION_1_1 };
+
+  const VkInstanceCreateInfo instance_info = { .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
                                                .pNext                   = NULL,
                                                .flags                   = instance_flags,
                                                .pApplicationInfo        = &app_info,
@@ -179,7 +194,10 @@ void geyser_init_vk(RenderState *restrict state) {
   }
 
   /* Now that we have an instance, load all other functions */
-  gladLoadVulkanUserPtr(NULL, glad_vulkan_load_func_vk, state->instance);
+  if (!gladLoadVulkanUserPtr(NULL, glad_vulkan_load_func_vk, state->instance)) {
+    printf("[Geyser Error] Failed to load instance-level Vulkan functions!\n");
+    abort();
+  }
 
   if (state->debug == 1) {
     const VkDebugReportCallbackCreateInfoEXT debug_callback_info = {
@@ -218,9 +236,11 @@ void geyser_init_vk(RenderState *restrict state) {
       if (state->debug == 1) {
         printf("[Geyser] Using a discrete GPU\n");
         printf(
-          "API Version: %u\nDriver Version: %u\nVendor ID: %u\nDevice: %s "
+          "API Version: %u.%u.%u\nDriver Version: %u\nVendor ID: %u\nDevice: %s "
           "(ID: %u)\n",
-          state->physical_device_properties.apiVersion,
+          VK_API_VERSION_MAJOR(state->physical_device_properties.apiVersion),
+          VK_API_VERSION_MINOR(state->physical_device_properties.apiVersion),
+          VK_API_VERSION_PATCH(state->physical_device_properties.apiVersion),
           state->physical_device_properties.driverVersion,
           state->physical_device_properties.vendorID,
           state->physical_device_properties.deviceName,
@@ -238,7 +258,10 @@ void geyser_init_vk(RenderState *restrict state) {
 
   state->physical_device_features.sampleRateShading = VK_TRUE;
 
-  gladLoadVulkanUserPtr(state->physical_device, glad_vulkan_load_func_vk, state->instance);
+  if (!gladLoadVulkanUserPtr(state->physical_device, glad_vulkan_load_func_vk, state->instance)) {
+    printf("[Geyser Error] Failed to load device-level Vulkan functions!\n");
+    abort();
+  }
 
   u32 queue_properties_count = 0;
   vkGetPhysicalDeviceQueueFamilyProperties(state->physical_device, &queue_properties_count, NULL);
@@ -253,10 +276,10 @@ void geyser_init_vk(RenderState *restrict state) {
   vkGetPhysicalDeviceQueueFamilyProperties(state->physical_device, &queue_properties_count, queue_properties);
 
   for (state->queue_family_index = 0; state->queue_family_index < queue_properties_count; state->queue_family_index++)
-    if (queue_properties[state->queue_family_index].queueFlags &
-            VK_QUEUE_GRAPHICS_BIT &&
-        glfwGetPhysicalDevicePresentationSupport(
-            state->instance, state->physical_device, state->queue_family_index))
+    if (
+      queue_properties[state->queue_family_index].queueFlags & VK_QUEUE_GRAPHICS_BIT &&
+      glfwGetPhysicalDevicePresentationSupport(state->instance, state->physical_device, state->queue_family_index)
+    )
       break;
 
   free(queue_properties);
@@ -275,7 +298,7 @@ void geyser_init_vk(RenderState *restrict state) {
   };
 
   const char *device_ext_names[8];
-  u32 device_ext_count            = 0;
+  u32 device_ext_count                 = 0;
   device_ext_names[device_ext_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
   device_ext_names[device_ext_count++] = VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME;
 
@@ -338,7 +361,10 @@ void geyser_init_vk(RenderState *restrict state) {
 
   VkSurfaceCapabilitiesKHR surface_capabilities;
 
-  if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(state->physical_device, state->surface, &surface_capabilities) != VK_SUCCESS) {
+  if (
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(state->physical_device, state->surface, &surface_capabilities) !=
+    VK_SUCCESS
+  ) {
     printf("[Geyser Error] Failed to get physical device surface capabilities!\n");
     abort();
   } else if (state->debug == 1) {
@@ -425,8 +451,10 @@ void geyser_init_vk(RenderState *restrict state) {
   case VK_FORMAT_B8G8R8A8_UNORM:
   case VK_FORMAT_B8G8R8A8_SRGB: break;
   default:
-    printf("[Geyser Error] Surface color format doesn't appear to be 8-bit "
-           "BGRA!\n");
+    printf(
+      "[Geyser Error] Surface color format doesn't appear to be 8-bit "
+      "BGRA!\n"
+    );
     abort();
   }
 
@@ -507,12 +535,13 @@ void geyser_init_vk(RenderState *restrict state) {
                                                           .preserveAttachmentCount = 0,
                                                           .pPreserveAttachments    = NULL } };
 
-  const VkRenderPassCreateInfo renderpass_info = { GEYSER_BASIC_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
-                                                   ),
-                                                   .attachmentCount = 1,
-                                                   .pAttachments    = attachment_description,
-                                                   .subpassCount    = 1,
-                                                   .pSubpasses      = subpass_description };
+  const VkRenderPassCreateInfo renderpass_info = {
+    GEYSER_BASIC_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO),
+    .attachmentCount = 1,
+    .pAttachments    = attachment_description,
+    .subpassCount    = 1,
+    .pSubpasses      = subpass_description
+  };
 
   if (vkCreateRenderPass(state->device, &renderpass_info, NULL, &state->renderpass) != VK_SUCCESS) {
     printf("[Geyser Error] Failed to create a render pass!\n");
@@ -520,8 +549,8 @@ void geyser_init_vk(RenderState *restrict state) {
   }
 
   const VkBufferCreateInfo general_buffer_info = { GEYSER_BASIC_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO),
-                                                   .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                                                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                   .usage                 = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                                                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                                    .size                  = util_mebibytes(256), /* BAR size */
                                                    .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
                                                    .queueFamilyIndexCount = state->queue_family_indices_count,
@@ -539,10 +568,11 @@ void geyser_init_vk(RenderState *restrict state) {
   vkAllocateMemory(state->device, &general_memory_allocation_info, NULL, &state->memory);
   vkBindBufferMemory(state->device, state->buffer, state->memory, 0);
 
-  VkCommandPoolCreateInfo command_pool_info = { GEYSER_MINIMAL_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
-                                                ),
-                                                .flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-                                                .queueFamilyIndex = state->queue_family_index };
+  VkCommandPoolCreateInfo command_pool_info = {
+    GEYSER_MINIMAL_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO),
+    .flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+    .queueFamilyIndex = state->queue_family_index
+  };
 
   vkCreateCommandPool(state->device, &command_pool_info, NULL, &state->command_pool);
 
@@ -655,14 +685,14 @@ void geyser_create_image_view(
                                                   .imageType = VK_IMAGE_TYPE_2D,
                                                   .format    = state->preferred_color_format,
                                                   .extent = { .width = (u32)size.x, .height = (u32)size.y, .depth = 1 },
-                                                  .mipLevels   = 1,
-                                                  .arrayLayers = 1,
-                                                  .samples     = samples,
-                                                  .tiling      = VK_IMAGE_TILING_OPTIMAL,
-                                                  .usage       = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                                           VK_IMAGE_USAGE_SAMPLED_BIT | usage,
+                                                  .mipLevels             = 1,
+                                                  .arrayLayers           = 1,
+                                                  .samples               = samples,
+                                                  .tiling                = VK_IMAGE_TILING_OPTIMAL,
+                                                  .usage                 = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                                                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                                                           VK_IMAGE_USAGE_SAMPLED_BIT | usage,
                                                   .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
                                                   .queueFamilyIndexCount = state->queue_family_indices_count,
                                                   .pQueueFamilyIndices   = state->queue_family_indices,
@@ -680,14 +710,9 @@ void geyser_create_image_view(
   memory_find_free_image_block(state, mm, memory_requirements.alignment, crc, memory_requirements.size, &mblock);
 
   gs_image_view->base.pool     = mblock.pool;
-  gs_image_view->base.offset   = mblock.free->offset;
+  gs_image_view->base.offset   = mblock.offset;
   gs_image_view->base.size     = memory_requirements.size;
   gs_image_view->base.newblock = mblock.newblock;
-
-  if (mblock.newblock == 1) {
-    mblock.free->offset += memory_requirements.size;
-    mblock.free->size -= memory_requirements.size;
-  }
 
   geyser_success_or_message(
     vkBindImageMemory(
@@ -707,14 +732,24 @@ void geyser_create_image_view(
   }
 }
 
-u32 geyser_get_memory_type_index(const RenderState *restrict state, const VkMemoryPropertyFlagBits flag) {
-  for (u32 i = 0; i < state->physical_device_memory_properties.memoryTypeCount; i++)
-    if (state->physical_device_memory_properties.memoryTypes[i].propertyFlags & flag)
-      return i;
+u32 geyser_get_memory_type_index_filtered(
+  const RenderState *restrict state, const VkMemoryPropertyFlags flags, const u32 type_bits
+) {
+  for (u32 i = 0; i < state->physical_device_memory_properties.memoryTypeCount; i++) {
+    if ((type_bits & (1U << i)) == 0)
+      continue;
 
-  printf("[Geyser Warning] Memory type index %i does not exist!\n", flag);
+    if ((state->physical_device_memory_properties.memoryTypes[i].propertyFlags & flags) == flags)
+      return i;
+  }
+
+  printf("[Geyser Warning] No memory type with properties 0x%x (allowed mask 0x%x)!\n", flags, type_bits);
 
   return 0;
+}
+
+u32 geyser_get_memory_type_index(const RenderState *restrict state, const VkMemoryPropertyFlagBits flag) {
+  return geyser_get_memory_type_index_filtered(state, (VkMemoryPropertyFlags)flag, ~0U);
 }
 
 void geyser_create_image(
@@ -729,12 +764,12 @@ void geyser_create_image(
                                                   .imageType = VK_IMAGE_TYPE_2D,
                                                   .format    = format,
                                                   .extent = { .width = (u32)size.x, .height = (u32)size.y, .depth = 1 },
-                                                  .mipLevels   = 1,
-                                                  .arrayLayers = 1,
-                                                  .samples     = VK_SAMPLE_COUNT_1_BIT,
-                                                  .tiling      = tiling,
-                                                  .usage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                                           VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | usage,
+                                                  .mipLevels             = 1,
+                                                  .arrayLayers           = 1,
+                                                  .samples               = VK_SAMPLE_COUNT_1_BIT,
+                                                  .tiling                = tiling,
+                                                  .usage                 = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                                                           VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | usage,
                                                   .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
                                                   .queueFamilyIndexCount = state->queue_family_indices_count,
                                                   .pQueueFamilyIndices   = state->queue_family_indices,

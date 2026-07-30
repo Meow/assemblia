@@ -160,13 +160,15 @@ void Level::parse_object_layer(simdjson::ondemand::value layer) {
       // ...
     }
 
-    this->objects.push_back({ .script     = script,
-                              .uid        = id,
-                              .tileset_id = uid,
-                              .width      = (f32)width / 32.0f,
-                              .height     = (f32)height / 32.0f,
-                              .x          = (f32)(x + width / 2) / 32.0f * 0.1f - 0.05f,
-                              .y          = (f32)(y - height / 2) / 32.0f * 0.1f - 0.05f });
+    this->objects.push_back(
+      { .script     = script,
+        .uid        = id,
+        .tileset_id = uid,
+        .width      = (f32)width / 32.0f,
+        .height     = (f32)height / 32.0f,
+        .x          = (f32)(x + width / 2) / 32.0f * 0.1f - 0.05f,
+        .y          = (f32)(y - height / 2) / 32.0f * 0.1f - 0.05f }
+    );
   }
 }
 

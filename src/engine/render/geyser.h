@@ -207,6 +207,14 @@ void geyser_update_texture_descriptor_set(RenderState RESTRICTED_PTR state, Geys
 u32 geyser_get_memory_type_index(const RenderState RESTRICTED_PTR state, const VkMemoryPropertyFlagBits flag);
 
 /**
+ * @brief Like geyser_get_memory_type_index(), but only considers memory types
+ * allowed by @p type_bits (a VkMemoryRequirements::memoryTypeBits mask).
+ */
+u32 geyser_get_memory_type_index_filtered(
+  const RenderState RESTRICTED_PTR state, const VkMemoryPropertyFlags flags, const u32 type_bits
+);
+
+/**
  * @brief Creates a new image.
  *
  * @param state The render state.

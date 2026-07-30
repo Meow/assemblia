@@ -5,6 +5,118 @@
 #include "../util.h"
 #include "geyser.h"
 
+static u64 _align_up(const u64 value, const u64 alignment) {
+  if (alignment < 2)
+    return value;
+
+  return (value + alignment - 1) / alignment * alignment;
+}
+
+/**
+ * Carves an aligned block of `size` bytes out of the free list.
+ *
+ * The list is kept sorted by offset; nodes are split, shrunk or unlinked as
+ * needed and candidate nodes are never mutated unless the allocation succeeds.
+ *
+ * Returns the aligned offset of the allocation, or MEMORY_ALLOC_FAILED.
+ */
+static u64 _free_list_carve(FreeList **head, const u64 alignment, const u64 size) {
+  FreeList *prev = NULL;
+
+  for (FreeList *l = *head; l != NULL; prev = l, l = l->next) {
+    const u64 aligned_offset = _align_up(l->offset, alignment);
+    const u64 padding        = aligned_offset - l->offset;
+
+    if (l->size < padding || l->size - padding < size)
+      continue;
+
+    const u64 tail = l->size - padding - size;
+
+    if (padding > 0 && tail > 0) {
+      /* Keep the padding in this node, spawn a new node for the tail */
+      FreeList *tail_node = (FreeList *)calloc(1, sizeof(FreeList));
+      tail_node->offset   = aligned_offset + size;
+      tail_node->size     = tail;
+      tail_node->next     = l->next;
+
+      l->size = padding;
+      l->next = tail_node;
+    } else if (padding > 0) {
+      l->size = padding;
+    } else if (tail > 0) {
+      l->offset = aligned_offset + size;
+      l->size   = tail;
+    } else {
+      /* Exact fit: unlink the node */
+      if (prev != NULL)
+        prev->next = l->next;
+      else
+        *head = l->next;
+
+      free(l);
+    }
+
+    return aligned_offset;
+  }
+
+  return MEMORY_ALLOC_FAILED;
+}
+
+/**
+ * Returns a block to the free list, keeping it sorted by offset and
+ * coalescing with both neighbors when they are adjacent.
+ */
+static void _free_list_release(FreeList **head, const u64 offset, const u64 size) {
+  if (size == 0)
+    return;
+
+  FreeList *prev = NULL;
+  FreeList *next = *head;
+
+  while (next != NULL && next->offset < offset) {
+    prev = next;
+    next = next->next;
+  }
+
+  if (prev != NULL && prev->offset + prev->size == offset) {
+    prev->size += size;
+
+    if (next != NULL && prev->offset + prev->size == next->offset) {
+      prev->size += next->size;
+      prev->next = next->next;
+
+      free(next);
+    }
+
+    return;
+  }
+
+  if (next != NULL && offset + size == next->offset) {
+    next->offset = offset;
+    next->size += size;
+
+    return;
+  }
+
+  FreeList *node = (FreeList *)calloc(1, sizeof(FreeList));
+  node->offset   = offset;
+  node->size     = size;
+  node->next     = next;
+
+  if (prev != NULL)
+    prev->next = node;
+  else
+    *head = node;
+}
+
+static void _free_list_destroy(FreeList *l) {
+  while (l != NULL) {
+    FreeList *next = l->next;
+    free(l);
+    l = next;
+  }
+}
+
 MemoryComponent *_find_existing_memory_block(MemoryManager *manager, const u64 crc) {
   if (crc == 0)
     return NULL;
@@ -16,7 +128,9 @@ MemoryComponent *_find_existing_memory_block(MemoryManager *manager, const u64 c
   return NULL;
 }
 
-void _add_memory_component(MemoryManager *manager, const u64 crc, MemoryPool *mp, ImageMemoryPool *imp, FreeList *fl) {
+void _add_memory_component(
+  MemoryManager *manager, const u64 crc, MemoryPool *mp, ImageMemoryPool *imp, const u64 offset, const u64 size
+) {
   if (crc == 0)
     return;
 
@@ -25,11 +139,14 @@ void _add_memory_component(MemoryManager *manager, const u64 crc, MemoryPool *mp
       manager->components[i].crc        = crc;
       manager->components[i].pool       = mp;
       manager->components[i].image_pool = imp;
-      manager->components[i].free_list  = fl;
+      manager->components[i].offset     = offset;
+      manager->components[i].size       = size;
 
       return;
     }
   }
+
+  printf("[Geyser Warning] Memory component table is full; allocation deduplication disabled for this block\n");
 }
 
 void memory_create_manager(RenderState *state, MemoryManager *m) {
@@ -39,6 +156,39 @@ void memory_create_manager(RenderState *state, MemoryManager *m) {
 
   memory_allocate_pool(state, m->pools);
   memory_allocate_image_pool(state, m->image_pools);
+}
+
+void memory_destroy_manager(RenderState *state, MemoryManager *m) {
+  MemoryPool *pool = m->pools;
+
+  while (pool != NULL) {
+    MemoryPool *next = pool->next;
+
+    _free_list_destroy(pool->free);
+    vkDestroyBuffer(state->device, pool->buffer, NULL);
+    vkFreeMemory(state->device, pool->memory, NULL);
+    free(pool);
+
+    pool = next;
+  }
+
+  ImageMemoryPool *image_pool = m->image_pools;
+
+  while (image_pool != NULL) {
+    ImageMemoryPool *next = image_pool->next;
+
+    _free_list_destroy(image_pool->free);
+    vkFreeMemory(state->device, image_pool->memory, NULL);
+    free(image_pool);
+
+    image_pool = next;
+  }
+
+  free(m->components);
+
+  m->pools       = NULL;
+  m->image_pools = NULL;
+  m->components  = NULL;
 }
 
 void memory_allocate_pool(RenderState *state, MemoryPool *mp) {
@@ -66,7 +216,9 @@ void memory_allocate_pool(RenderState *state, MemoryPool *mp) {
   const VkMemoryAllocateInfo memory_alloc_info = {
     GEYSER_MINIMAL_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO),
     .allocationSize  = memory_requirements.size,
-    .memoryTypeIndex = geyser_get_memory_type_index(state, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+    .memoryTypeIndex = geyser_get_memory_type_index_filtered(
+      state, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memory_requirements.memoryTypeBits
+    )
   };
 
   geyser_success_or_message(
@@ -84,10 +236,40 @@ void memory_allocate_image_pool(RenderState *state, ImageMemoryPool *mp) {
   mp->free->offset = 0;
   mp->free->size   = util_mebibytes(MEMORY_POOL_SIZE);
 
+  /* Images bound to this pool must use a memory type allowed by their
+   * memory requirements, so probe with a throwaway image matching the
+   * ones geyser_create_image_view() creates. */
+  u32 image_type_bits = ~0U;
+
+  const VkImageCreateInfo probe_info = { GEYSER_BASIC_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO),
+                                         .imageType   = VK_IMAGE_TYPE_2D,
+                                         .format      = state->preferred_color_format,
+                                         .extent      = { .width = 16, .height = 16, .depth = 1 },
+                                         .mipLevels   = 1,
+                                         .arrayLayers = 1,
+                                         .samples     = VK_SAMPLE_COUNT_1_BIT,
+                                         .tiling      = VK_IMAGE_TILING_OPTIMAL,
+                                         .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                         .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+                                         .queueFamilyIndexCount = 0,
+                                         .pQueueFamilyIndices   = NULL,
+                                         .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED };
+
+  VkImage probe_image;
+
+  if (vkCreateImage(state->device, &probe_info, NULL, &probe_image) == VK_SUCCESS) {
+    VkMemoryRequirements probe_requirements;
+    vkGetImageMemoryRequirements(state->device, probe_image, &probe_requirements);
+    image_type_bits = probe_requirements.memoryTypeBits;
+    vkDestroyImage(state->device, probe_image, NULL);
+  }
+
   const VkMemoryAllocateInfo memory_alloc_info = {
     GEYSER_MINIMAL_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO),
-    .allocationSize  = util_mebibytes(MEMORY_POOL_SIZE),
-    .memoryTypeIndex = geyser_get_memory_type_index(state, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+    .allocationSize = util_mebibytes(MEMORY_POOL_SIZE),
+    .memoryTypeIndex =
+      geyser_get_memory_type_index_filtered(state, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image_type_bits)
   };
 
   geyser_success_or_message(
@@ -98,197 +280,117 @@ void memory_allocate_image_pool(RenderState *state, ImageMemoryPool *mp) {
 }
 
 void memory_extend_pool(RenderState *state, MemoryPool *pool) {
-  if (pool->next != NULL) {
-    memory_extend_pool(state, pool->next);
-    return;
-  }
+  while (pool->next != NULL)
+    pool = pool->next;
 
   pool->next = (MemoryPool *)calloc(1, sizeof(MemoryPool));
   memory_allocate_pool(state, pool->next);
 }
 
 void memory_extend_image_pool(RenderState *state, ImageMemoryPool *pool) {
-  if (pool->next != NULL) {
-    memory_extend_image_pool(state, pool->next);
-    return;
-  }
+  while (pool->next != NULL)
+    pool = pool->next;
 
   pool->next = (ImageMemoryPool *)calloc(1, sizeof(ImageMemoryPool));
   memory_allocate_image_pool(state, pool->next);
 }
 
-FreeList *memory_pool_find_free_block(const MemoryPool *m, const u64 size) {
-  FreeList *l = m->free;
-
-  while (l != NULL) {
-    if (l->size >= size)
-      break;
-
-    l = l->next;
+static void _validate_request(const MemoryManager *m, const u64 size) {
+  if (size > util_mebibytes(MEMORY_POOL_SIZE)) {
+    printf(
+      "[Geyser Error] Cannot assign more than %lu MiB of GPU memory! (%llu bytes requested)\n",
+      MEMORY_POOL_SIZE,
+      (unsigned long long)size
+    );
+    abort();
   }
 
-  return l;
-}
-
-FreeList *memory_pool_find_free_block_aligned(const ImageMemoryPool *m, const u64 alignment, const u64 size) {
-  FreeList *l = m->free;
-
-  while (l != NULL) {
-    if (l->offset % alignment == 0) {
-      if (l->size >= size)
-        break;
-    } else {
-      const u64 diff = alignment - l->offset % alignment;
-
-      if (l->size - diff >= size) {
-        /* This has bugs. TODO: fix this */
-        l->offset += diff;
-        l->size -= diff;
-
-        break;
-      }
-    }
-
-    l = l->next;
+  if (m == NULL || m->pools == NULL || m->image_pools == NULL) {
+    printf("[Geyser Error] Memory manager is not initialized!\n");
+    abort();
   }
-
-  return l;
 }
 
 void memory_find_free_block(
   RenderState *state, MemoryManager *m, const u64 crc, const u64 size, FreeMemoryBlock *block
 ) {
-  if (size > util_mebibytes(MEMORY_POOL_SIZE)) {
-    printf(
-      "[Geyser Error] Cannot assign more than %lu MiB of GPU memory! (%lu bytes requested)\n", MEMORY_POOL_SIZE, size
-    );
-    abort();
-  }
+  _validate_request(m, size);
 
-  if (m == NULL || m->pools == NULL) {
-    printf("[Geyser Error] Memory manager is not initialized!\n");
-    abort();
-  }
+  const MemoryComponent *mc = _find_existing_memory_block(m, crc);
 
-  MemoryComponent *mc = _find_existing_memory_block(m, crc);
-
-  if (mc != NULL) {
+  if (mc != NULL && mc->pool != NULL) {
     block->pool     = mc->pool;
-    block->free     = mc->free_list;
+    block->offset   = mc->offset;
     block->newblock = 0;
 
     return;
   }
 
-  FreeList *l      = NULL;
-  MemoryPool *pool = m->pools;
+  for (;;) {
+    for (MemoryPool *pool = m->pools; pool != NULL; pool = pool->next) {
+      const u64 offset = _free_list_carve(&pool->free, MEMORY_DEFAULT_ALIGNMENT, size);
 
-  while (pool != NULL) {
-    l = memory_pool_find_free_block(pool, size);
+      if (offset != MEMORY_ALLOC_FAILED) {
+        _add_memory_component(m, crc, pool, NULL, offset, size);
 
-    if (l != NULL)
-      break;
+        block->pool     = pool;
+        block->offset   = offset;
+        block->newblock = 1;
 
-    pool = pool->next;
-  }
+        return;
+      }
+    }
 
-  if (l == NULL) {
+    /* A fresh pool always satisfies the request (size <= pool size, offset 0
+     * is aligned), so this loops at most twice. */
     memory_extend_pool(state, m->pools);
-    memory_find_free_block(state, m, crc, size, block);
-
-    return;
   }
-
-  _add_memory_component(m, crc, pool, NULL, l);
-
-  block->pool     = pool;
-  block->free     = l;
-  block->newblock = 1;
 }
 
 void memory_find_free_image_block(
   RenderState *state, MemoryManager *m, const u64 alignment, const u64 crc, const u64 size, FreeImageMemoryBlock *block
 ) {
-  if (size > util_mebibytes(MEMORY_POOL_SIZE)) {
-    printf(
-      "[Geyser Error] Cannot assign more than %lu MiB of GPU memory! (%lu bytes requested)\n", MEMORY_POOL_SIZE, size
-    );
-    abort();
-  }
+  _validate_request(m, size);
 
-  if (m == NULL || m->image_pools == NULL) {
-    printf("[Geyser Error] Memory manager is not initialized!\n");
-    abort();
-  }
+  const MemoryComponent *mc = _find_existing_memory_block(m, crc);
 
-  MemoryComponent *mc = _find_existing_memory_block(m, crc);
-
-  if (mc != NULL) {
+  if (mc != NULL && mc->image_pool != NULL) {
     block->pool     = mc->image_pool;
-    block->free     = mc->free_list;
+    block->offset   = mc->offset;
     block->newblock = 0;
 
     return;
   }
 
-  FreeList *l           = NULL;
-  ImageMemoryPool *pool = m->image_pools;
+  for (;;) {
+    for (ImageMemoryPool *pool = m->image_pools; pool != NULL; pool = pool->next) {
+      const u64 offset = _free_list_carve(&pool->free, alignment, size);
 
-  while (pool != NULL) {
-    l = memory_pool_find_free_block_aligned(pool, alignment, size);
+      if (offset != MEMORY_ALLOC_FAILED) {
+        _add_memory_component(m, crc, NULL, pool, offset, size);
 
-    if (l != NULL)
-      break;
+        block->pool     = pool;
+        block->offset   = offset;
+        block->newblock = 1;
 
-    pool = pool->next;
-  }
+        return;
+      }
+    }
 
-  if (l == NULL) {
     memory_extend_image_pool(state, m->image_pools);
-    memory_find_free_image_block(state, m, alignment, crc, size, block);
-
-    return;
   }
-
-  _add_memory_component(m, crc, NULL, pool, l);
-
-  block->pool     = pool;
-  block->free     = l;
-  block->newblock = 1;
 }
 
 void memory_free_block(MemoryPool *pool, const u64 offset, const u64 size) {
-  FreeList *l = pool->free;
+  if (pool == NULL)
+    return;
 
-  FreeList *new_freelist = (FreeList *)calloc(1, sizeof(FreeList));
-  new_freelist->next     = l;
-  new_freelist->offset   = offset;
-  new_freelist->size     = size;
-
-  if (offset + size == l->offset) {
-    new_freelist->size += l->size;
-    new_freelist->next = l->next;
-
-    free(l);
-  }
-
-  pool->free = new_freelist;
+  _free_list_release(&pool->free, offset, size);
 }
 
 void memory_free_image_block(ImageMemoryPool *pool, const u64 offset, const u64 size) {
-  FreeList *l = pool->free;
+  if (pool == NULL)
+    return;
 
-  FreeList *new_freelist = (FreeList *)calloc(1, sizeof(FreeList));
-  new_freelist->next     = l;
-  new_freelist->offset   = offset;
-  new_freelist->size     = size;
-
-  if (offset + size == l->offset) {
-    new_freelist->size += l->size;
-    new_freelist->next = l->next;
-
-    free(l);
-  }
-
-  pool->free = new_freelist;
+  _free_list_release(&pool->free, offset, size);
 }
