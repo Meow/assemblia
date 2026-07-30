@@ -1,13 +1,23 @@
 # Assemblia®
 
-Dungeon-Crawler where you replace your limbs with guns that you tore off of your enemies. 
-Battle System like Dragon Quest where you can target different weapons, limbs and body parts of enemies and shoot them off.
+Formerly a project made in a team for university. The task was:
+
+- To make a game
+- ...that didn't use an existing game enging
+- ...in C++
+- ...with dungeon crawl / rogue-like elements
+
+I (Luna Fox) decided to write a small engine called miniflow in order to combine this assignment with learning how to program Vulkan. I was not very good at it. Now I am just re-using the code to experiment with Vulkan 4 years later. Don't expect much!
+
+This game is scriptable via Lua (LuaJIT 2.1). Engine is written in C, Game is written in C++. It tried to use data-oriented design. I uh, misunderstood what it was.
+
+Look, this project was written years ago when I was young, idealistic, and somewhat mentally unstable. I had opinions that I can  best describe as "shitty takes" back then. Don't judge the young me too harshly.
 
 # Building
 
-The game is currently targeted at 64-bit x86 architecture. ARM64 support may be added in the future. Due to usage of Vulkan, we do not (currently) support macOS. This is a Linux-first system, but is extensively tested on both Linux and Windows.
+The game is currently targeted at 64-bit x86 architecture. ARM64 is supported. This is a Linux-first system, but is extensively tested on both Linux and Windows. MacOS support is available too, but not as extensively tested.
 
-**Supported Platforms:** Linux x86_64 (X11, via `-platform x11`, or by default if Wayland isn't available), Linux x86_64 (Wayland), Windows x86_64
+**Supported Platforms:** Linux x86_64 (X11, via `-platform x11`, or by default if Wayland isn't available), Linux x86_64 (Wayland), Windows x86_64, macOS arm64
 
 ## Prerequisites
 
@@ -22,7 +32,7 @@ The game is currently targeted at 64-bit x86 architecture. ARM64 support may be 
 
 **On Linux:**
 
-- gcc9 or newer (must support C++20 and C11 standards)
+- gcc16 or newer (must support C++20 and C11 standards)
 - git
 - cmake
 - Vulkan-compatible GPU driver which provides `libvulkan.so.1` and a Vulkan implementation
@@ -30,8 +40,8 @@ The game is currently targeted at 64-bit x86 architecture. ARM64 support may be 
 
 **On Windows:**
 
-- Windows 10 (1607, Anniversary Update) or newer
-- Visual Studio 2019 or newer with C++ development features selected (which must provide MSVC compiler with vc140 / MSVC 2015)
+- Windows 11
+- Visual Studio 2022 newer with C++ development features selected (which must provide MSVC compiler with vc140 / MSVC 2015)
 - cmake commandline tools
 - git commandline tools
 - Vulkan-compatible GPU driver which provides `vulkan-1.dll` and a Vulkan implementation
