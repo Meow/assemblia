@@ -34,6 +34,9 @@ gcc16Stdenv.mkDerivation {
   ];
 
   shellHook = ''
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${lib.strings.makeLibraryPath [ libGL vulkan-loader libxkbcommon wayland libx11 ]}
+    # Append the system lib dir so Fedora's Vulkan ICDs (and their deps like
+    # libdrm/libz) can be dlopen'd from inside the nix env. Must come last so
+    # nix libraries still take precedence.
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${lib.strings.makeLibraryPath [ libGL vulkan-loader libxkbcommon wayland libx11 ]}:/usr/lib64
   '';
 }
