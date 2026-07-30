@@ -50,6 +50,9 @@ include_directories("${VULKAN_HEADERS_DIR}/include")
 include_directories("${STB_DIR}")
 include_directories("${JSON_DIR}")
 include_directories("${LUA_DIR}")
+# Rolling LuaJIT generates luajit.h (included by lua.hpp) into the binary dir
+# of the luajit-cmake include site, i.e. the top-level build dir.
+include_directories("${CMAKE_BINARY_DIR}")
 
 add_library(game ${game_source_files})
 target_link_libraries(game PRIVATE logic input state render glfw libluajit)
