@@ -217,9 +217,6 @@ void renderable_load_texture(RenderState *state, Renderable *r, const char *imag
     else
       geyser_set_image_memory_barrier(state, &r->texture->base.base);
 
-    geyser_allocate_texture_descriptor_set(state, r->texture, (GeyserPipeline *)&state->pipeline);
-    geyser_update_texture_descriptor_set(state, r->texture);
-
     _add_geyser_texture(crc, r->texture);
   } else {
     r->texture = tex;
@@ -247,9 +244,6 @@ void renderable_set_texture(RenderState *state, Renderable *r, const Image tex_i
       geyser_set_image_memory(state, &r->texture->base.base, &tex_img);
     else
       geyser_set_image_memory_barrier(state, &r->texture->base.base);
-
-    geyser_allocate_texture_descriptor_set(state, r->texture, (GeyserPipeline *)&state->pipeline);
-    geyser_update_texture_descriptor_set(state, r->texture);
 
     _add_geyser_texture(crc, r->texture);
   } else {

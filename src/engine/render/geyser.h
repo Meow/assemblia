@@ -9,6 +9,8 @@ extern "C" {
 #define GEYSER_BASIC_VK_STRUCT_INFO(t)   .sType = t, .pNext = NULL, .flags = 0
 #define GEYSER_MAX_TEXTURES              16384
 #define GEYSER_MAX_GLYPHS                65536
+#define GEYSER_RENDERABLE_TEXTURE_SLOTS  16
+#define GEYSER_MAX_RENDERABLE_BATCHES    64
 
 /**
  * Geyser is a minimalistic Vulkan middleware library.
@@ -64,16 +66,27 @@ typedef struct GeyserVertexInputDescription {
 
 typedef struct GeyserPushConstants {
   Matrix4 camera;
-  Vector4 quaternion;
-  Vector4 position;
-  Vector4 vertex_color;
-  Vector2 scale;
-  Vector2 uv_offset;
 } GeyserPushConstants;
 
-typedef struct GeyserTextPushConstants {
-  Matrix4 camera;
-} GeyserTextPushConstants;
+/**
+ * Per-instance renderable data, uploaded to a storage buffer once per frame
+ * and indexed by gl_InstanceIndex in unlit_generic.vert.
+ *
+ * The layout must match the std430 RenderableData struct in the shader:
+ * every member is 4-byte scalars/floats, so C struct packing lines up with
+ * std430 (vec2 array stride is 8) as long as the total size stays a
+ * multiple of 16.
+ */
+typedef struct GeyserRenderableData {
+  Vector4 quaternion;
+  Vector4 position;
+  Vector4 color;
+  Vector2 scale;
+  Vector2 uv_offset;
+  Vector2 uvs[6];
+  i32 texture_index;
+  i32 _pad[3];
+} GeyserRenderableData;
 
 /**
  * @brief Initializes Vulkan resources.

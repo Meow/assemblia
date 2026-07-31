@@ -15,6 +15,13 @@
 #define VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME "VK_KHR_portability_subset"
 #endif
 
+/* Descriptor indexing is core in 1.2 (glad has the core struct and sType);
+ * the extension name is only needed as a fallback for 1.1-only devices, and
+ * glad doesn't carry it since the extension isn't in its generation list. */
+#ifndef VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
+#define VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME "VK_EXT_descriptor_indexing"
+#endif
+
 /* This pretty much remains the same all the time */
 static const VkSemaphoreCreateInfo semaphore_create_info = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
                                                              .pNext = NULL,
@@ -154,17 +161,16 @@ void geyser_init_vk(RenderState *restrict state) {
     );
   }
 
-  /* Targeting 1.1: the vendored glad loader is generated for Vulkan 1.1, and
-   * its extension detection breaks against instances created with apiVersion
-   * >= 1.2 (the loader stops resolving global commands through
-   * vkGetInstanceProcAddr(instance, ...) for those). Regenerate glad before
-   * raising this. */
+  /* Targeting 1.2 (descriptor indexing is core there). The vendored glad
+   * loader is generated for the same version; regenerate it before raising
+   * this — an older glad's extension detection breaks against instances
+   * created with a newer apiVersion. */
   const VkApplicationInfo app_info = { GEYSER_MINIMAL_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_APPLICATION_INFO),
                                        .pApplicationName   = "Geyser",
                                        .applicationVersion = 1,
                                        .pEngineName        = "Miniflow",
                                        .engineVersion      = 1,
-                                       .apiVersion         = VK_API_VERSION_1_1 };
+                                       .apiVersion         = VK_API_VERSION_1_2 };
 
   const VkInstanceCreateInfo instance_info = { .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
                                                .pNext                   = NULL,
@@ -305,6 +311,7 @@ void geyser_init_vk(RenderState *restrict state) {
   /* If the device exposes VK_KHR_portability_subset (e.g. MoltenVK), the Vulkan
    * spec requires that we enable it. */
   u32 available_device_ext_count = 0;
+  u8 has_descriptor_indexing     = 0;
   vkEnumerateDeviceExtensionProperties(state->physical_device, NULL, &available_device_ext_count, NULL);
 
   if (available_device_ext_count > 0) {
@@ -315,20 +322,61 @@ void geyser_init_vk(RenderState *restrict state) {
     );
 
     for (u32 i = 0; i < available_device_ext_count; i++) {
-      if (strcmp(available_device_exts[i].extensionName, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME) == 0) {
+      if (strcmp(available_device_exts[i].extensionName, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME) == 0)
         device_ext_names[device_ext_count++] = VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME;
-        break;
-      }
+
+      if (strcmp(available_device_exts[i].extensionName, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == 0)
+        has_descriptor_indexing = 1;
     }
 
     free(available_device_exts);
   }
 
-  const VkDeviceCreateInfo device_create_info = { GEYSER_BASIC_VK_STRUCT_INFO(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO),
-                                                  .queueCreateInfoCount    = 1,
-                                                  .pQueueCreateInfos       = &queue_create_info,
-                                                  .enabledLayerCount       = validation_layer_count,
-                                                  .ppEnabledLayerNames     = validation_layer_names,
+  /* The renderer draws all sprites in a single instanced call, sampling from
+   * an array of textures indexed per-instance. That indexing is not
+   * dynamically uniform, so shaderSampledImageArrayNonUniformIndexing is
+   * required. It is core in 1.2; on 1.1-only devices it is available through
+   * VK_EXT_descriptor_indexing, which must then be enabled by name. */
+  const u8 device_is_12 = state->physical_device_properties.apiVersion >= VK_API_VERSION_1_2;
+
+  VkPhysicalDeviceDescriptorIndexingFeatures descriptor_indexing_features;
+  memset(&descriptor_indexing_features, 0, sizeof(descriptor_indexing_features));
+  descriptor_indexing_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+
+  if (device_is_12 || has_descriptor_indexing) {
+    VkPhysicalDeviceFeatures2 features2;
+    memset(&features2, 0, sizeof(features2));
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &descriptor_indexing_features;
+
+    vkGetPhysicalDeviceFeatures2(state->physical_device, &features2);
+  }
+
+  if (!descriptor_indexing_features.shaderSampledImageArrayNonUniformIndexing) {
+    printf(
+      "[Geyser Error] Device does not support non-uniform sampled image array "
+      "indexing (descriptor indexing)!\n"
+    );
+    abort();
+  }
+
+  if (!device_is_12)
+    device_ext_names[device_ext_count++] = VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME;
+
+  /* Enable only the feature we actually use. */
+  VkPhysicalDeviceDescriptorIndexingFeatures enabled_indexing_features;
+  memset(&enabled_indexing_features, 0, sizeof(enabled_indexing_features));
+  enabled_indexing_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+  enabled_indexing_features.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+
+  const VkDeviceCreateInfo device_create_info = { .sType                = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+                                                  .pNext                = &enabled_indexing_features,
+                                                  .flags                = 0,
+                                                  .queueCreateInfoCount = 1,
+                                                  .pQueueCreateInfos    = &queue_create_info,
+                                                  /* Device layers are deprecated; only instance layers are used. */
+                                                  .enabledLayerCount       = 0,
+                                                  .ppEnabledLayerNames     = NULL,
                                                   .enabledExtensionCount   = device_ext_count,
                                                   .ppEnabledExtensionNames = device_ext_names,
                                                   .pEnabledFeatures        = &state->physical_device_features };
